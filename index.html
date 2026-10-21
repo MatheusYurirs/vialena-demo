@@ -5,7 +5,7 @@
 <meta charset="utf-8"/><meta content="width=device-width, initial-scale=1" name="viewport"/>
 <meta content="noindex,nofollow" name="robots"/>
 <meta content="#F6FAFD" name="theme-color"/>
-<title>Vialena | Painel demonstrativo para nutricionistas</title>
+<title>Motor R1 experimental · Vialena | Painel demonstrativo para nutricionistas</title>
 
 <link href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIiByb2xlPSJpbWciIGFyaWEtbGFiZWxsZWRieT0idHRsIGRzYyI+CiAgPHRpdGxlIGlkPSJ0dGwiPlZpYWxlbmEgLSBzw61tYm9sbyBjb25jZWl0dWFsIGF6dWw8L3RpdGxlPgogIDxkZXNjIGlkPSJkc2MiPkRvaXMgdHJhamV0b3MgYXp1aXMgc2UgZW5jb250cmFtIG5vIGZvcm1hdG8gZGEgbGV0cmEgVi48L2Rlc2M+CiAgPHBhdGggZmlsbD0iIzFENUQ5OSIgZD0iTTggMTRoMTBjOSAwIDE1IDUgMjEgMTdsMjAgMzljMyA2IDcgOSAxNSA2LTggMTItMjUgMTctMzUtMUw4IDE0WiIvPgogIDxwYXRoIGZpbGw9IiM4N0I4RTYiIGQ9Ik05MSAxM2gtOGMtMTEgMC0xOCA1LTIzIDE2TDQ2IDYwYy0yIDUtMyA4LTQgMTEgOCAxMSAxOSA3IDI2LTdMOTEgMTNaIi8+Cjwvc3ZnPgo=" rel="icon" type="image/svg+xml"/><style>
 
@@ -293,6 +293,20 @@ input,select,textarea{max-width:100%}
 :focus-visible{outline:3px solid var(--vl-focus);outline-offset:3px}
 @media(max-width:760px){.sidebar:not(.open){visibility:hidden}.sidebar.open{visibility:visible;width:min(280px,90vw)}}
 @media(max-width:430px){.draft-tools>.button{width:100%}.draft-tools label{flex-basis:100%}}
+/* Motor R1: retains Azul Mineral; output updates never replace interactive controls. */
+.motor-preview-section{margin:24px 0;padding-top:20px;border-top:1px solid var(--line,#dbe5ed)}
+.motor-results-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:16px 0}
+.motor-result{min-width:0;padding:16px;background:#f6fafd;border:1px solid #d4e2ed;border-radius:12px;overflow-wrap:anywhere}
+.motor-kind{display:block;font-size:11px;font-weight:700;color:#365b73;text-transform:uppercase;letter-spacing:.04em}
+.motor-result h3{font-size:14px;margin:8px 0}.motor-result output{display:block;font-size:23px;color:#183d57;font-weight:700}
+.motor-result p{font-size:12px;line-height:1.55;color:#486274;margin:8px 0 0}.motor-result .motor-warning{color:#71480e;font-weight:700}
+.motor-history{margin:20px 0}.motor-history pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;background:#f6fafd;padding:10px;max-height:340px;overflow:auto}
+.motor-history details summary{cursor:pointer;padding:10px 0;color:#214b69;font-weight:600}
+.motor-history li{margin:8px 0;overflow-wrap:anywhere}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#motor-eligibility{margin-top:16px}#motor-jp-confirm label{display:flex;gap:10px;align-items:flex-start}#motor-jp-confirm input{flex:none;margin-top:4px}
+@media(max-width:600px){.motor-results-grid{grid-template-columns:1fr}.motor-result output{font-size:21px}}
+.motor-formulas{padding:12px;border:1px solid #d4e2ed;border-radius:10px;margin:12px 0;color:#365b73;font-size:13px}.motor-formulas summary{cursor:pointer;font-weight:700}.motor-formulas p{margin:10px 0;overflow-wrap:anywhere}
+.assessment-actions>.button{white-space:normal;max-width:100%;line-height:1.45;text-align:center}
 
 </style></head>
 <body>
@@ -444,6 +458,257 @@ input,select,textarea{max-width:100%}
 
 </script>
 <script>
+/* Vialena experimental engine. Pure functions: no DOM, clock, storage or network. */
+(function(root){
+'use strict';
+const VERSION='0.6-motor-r1.1';
+const REFERENCES=Object.freeze({
+ reported:'Resultado externo transcrito pelo profissional; ver identificação da fonte no snapshot.',
+ arithmetic:'Definições matemáticas; fórmulas e unidades em REFERENCIAS-MOTOR.md',
+ rfm:'https://doi.org/10.1038/s41598-018-29362-1',
+ jp3:'https://doi.org/10.1079/BJN19780152',
+ siri:'https://escholarship.org/uc/item/6mh9f4nf',
+ jpFemale:'https://pubmed.ncbi.nlm.nih.gov/7402053/'
+});
+const UNAVAILABLE=Object.freeze({
+ 'jp3-female':'JP3 feminino indisponível nesta R1: tabela original de coeficientes não conferida com legibilidade suficiente.',
+ 'jp7':'JP7 indisponível nesta R1: variantes, coeficientes e casos independentes ainda não verificados integralmente.',
+ 'bia-raw':'Resistência e reatância não geram composição corporal sem equação específica verificada.'
+});
+const CIRC=['neck','chest','armRelaxed','armFlexed','waist','abdomen','hip','thigh','calf'];
+const FOLDS=['triceps','biceps','subscapular','suprailiac','abdominal','chestFold','thighFold','midaxillary'];
+const BIA=['muscle','bodyWater','resistance','reactance','deviceFatMass'];
+const trim=x=>String(x??'').trim();
+function number(value){
+ if(value==null||value==='')return null;
+ if(typeof value==='number')return Number.isFinite(value)?value:null;
+ if(typeof value!=='string')return null;
+ const s=value.trim();if(!/^[+-]?(?:\d+(?:[.,]\d+)?|[.,]\d+)$/.test(s))return null;
+ const n=Number(s.replace(',','.'));return Number.isFinite(n)?n:null;
+}
+function convert(value,from,to){
+ const v=number(value);if(v===null)return null;
+ const dims={kg:['mass',1],g:['mass',0.001],m:['length',1],cm:['length',0.01],mm:['length',0.001],'%':['percentage',1],'Ω':['resistance',1]};
+ if(!dims[from]||!dims[to]||dims[from][0]!==dims[to][0])return null;
+ const n=v*dims[from][1]/dims[to][1];return Number.isFinite(n)?n:null;
+}
+const positive=x=>number(x)!==null&&number(x)>0;
+const pct=x=>number(x)!==null&&number(x)>=0&&number(x)<=100;
+function bmi(w,h,unit='cm'){const m=convert(h,unit,'m');const value=positive(w)&&positive(m)?number(w)/(m*m):null;return Number.isFinite(value)&&value>0?value:null;}
+function ratio(a,b,aUnit='cm',bUnit='cm'){const x=convert(a,aUnit,'cm'),y=convert(b,bUnit,'cm');const value=positive(x)&&positive(y)?x/y:null;return Number.isFinite(value)&&value>0?value:null;}
+function masses(weight,fat){if(!positive(weight)||!pct(fat))return null;const fatMass=number(weight)*(number(fat)/100);if(!Number.isFinite(fatMass))return null;return {fatMass,fatFreeMass:number(weight)-fatMass};}
+function rfm({height,waist,unit='cm',sexParameter,age,waistSite,population}){
+ if(!['male','female'].includes(sexParameter))return {value:null,reason:'Informe o parâmetro da equação; não é inferido do cadastro.'};
+ if(!Number.isInteger(number(age))||number(age)<20||number(age)>69)return {value:null,reason:'RFM experimental limitada à faixa de validação de 20–69 anos.'};
+ if(population!=='general-adult')return {value:null,reason:'Elegibilidade não confirmada: esta demonstração não habilita estimativas para gestação, atletas ou condições especiais.'};
+ if(waistSite!=='nhanes-iliac')return {value:null,reason:'RFM exige cintura no bordo superior lateral do ílio direito, em pé, ao final da expiração; abdômen umbilical não substitui cintura.'};
+ const r=ratio(height,waist,unit,unit);if(r===null)return {value:null,reason:'Informe altura e cintura positivas na unidade selecionada.'};
+ const value=64-20*r+(sexParameter==='female'?12:0);
+ return pct(value)?{value,reason:''}:{value:null,reason:'Estimativa fora de 0–100%; revise medidas e aplicabilidade. Sem truncamento automático.'};
+}
+function siri(density){const d=number(density);if(!positive(d))return null;const value=495/d-450;return pct(value)?value:null;}
+function jp3({equation,age,chestFold,abdominal,thighFold,unit='mm',population,protocolConfirmed}){
+ if(equation!=='jp3-male')return {density:null,value:null,reason:UNAVAILABLE[equation]||'Selecione um protocolo verificado.'};
+ if(!Number.isInteger(number(age))||number(age)<18||number(age)>61)return {density:null,value:null,reason:'JP3 masculino exige idade na avaliação entre 18 e 61 anos.'};
+ if(population!=='general-adult'||protocolConfirmed!==true)return {density:null,value:null,reason:'Confirme o contexto adulto e a coleta nos sítios do protocolo JP3.'};
+ const v=[chestFold,abdominal,thighFold].map(x=>convert(x,unit,'mm'));
+ if(!v.every(positive))return {density:null,value:null,reason:'Informe as três dobras positivas: peitoral, abdominal e coxa, em mm.'};
+ const sum=v.reduce((a,b)=>a+b,0);
+ // Table 1 development sample: sum of 3 folds 14–118 mm; conservative experimental gate.
+ if(sum<14||sum>118)return {density:null,value:null,reason:'Soma fora de 14–118 mm, faixa da amostra de desenvolvimento adotada nesta R1.'};
+ const density=1.10938-0.0008267*sum+0.0000016*sum*sum-0.0002574*number(age);
+ const value=siri(density);return {density:value===null?null:density,value,reason:value===null?'Siri produziu percentual fora de 0–100%; revise aplicabilidade.':''};
+}
+function pickInput(raw,techniques){
+ const allowed=['weight','height','heightUnit','date','patientId','generalProtocol'];
+ if(techniques.includes('perimetry'))allowed.push(...CIRC,'perimetryProtocol','waistSite','circumferenceEquation');
+ if(techniques.includes('skinfolds')){
+  allowed.push('skinfoldEquation','skinfoldProtocol','caliper','jpProtocolConfirmed');
+  allowed.push(...(raw.skinfoldEquation==='jp3-male'?['chestFold','abdominal','thighFold']:FOLDS));
+ }
+ if(techniques.includes('bia'))allowed.push(...BIA,'device','deviceManufacturer','deviceModel','deviceAlgorithm','conditions');
+ if(techniques.some(t=>t==='skinfolds'||t==='bia'))allowed.push('fat','fatFreeMass','resultSource','protocol','resultDescription',...['fat','fatFreeMass'].flatMap(k=>['Source','Description','Protocol','Device'].map(s=>k+s)));
+ if((techniques.includes('perimetry')&&raw.circumferenceEquation==='rfm')||(techniques.includes('skinfolds')&&trim(raw.skinfoldEquation)&&raw.skinfoldEquation!=='none'))allowed.push('equationAge','sexParameter','population');
+ const input={};for(const k of [...new Set(allowed)])if(Object.hasOwn(raw,k))input[k]=raw[k];
+ return input;
+}
+function evaluate(raw,techniques,context={}){
+ const input=pickInput(raw,techniques),n=k=>number(input[k]),t=k=>trim(input[k]);
+ const assessedAt=t('date'),calculatedAt=context.calculatedAt||null;
+ const output=[],issues=[];
+ const add=(key,label,value,unit,kind,method,keys,extra={})=>{
+  const ok=Number.isFinite(value);
+  const result={id:method+':'+key,key,label,value:ok?value:null,unit,kind,status:ok?'available':'unavailable',reason:ok?'':extra.reason||'Entradas ausentes ou inválidas.',technique:extra.technique||'arithmetic',method,equationVersion:'1',engineVersion:VERSION,reference:REFERENCES[extra.reference||'arithmetic'],assessedAt,calculatedAt,inputSnapshot:Object.fromEntries(keys.filter(k=>Object.hasOwn(input,k)).map(k=>[k,input[k]])),...extra};
+  output.push(result);return result;
+ };
+ const heightUnit=t('heightUnit')||'cm',height=convert(input.height,heightUnit,'cm');
+ add('bmi','IMC',bmi(input.weight,input.height,heightUnit),'kg/m²','calculated','bmi',['weight','height','heightUnit']);
+ if(techniques.includes('perimetry')){
+  const site=['nhanes-iliac','who-midpoint','other'].includes(t('waistSite'))&&(t('waistSite')!=='other'||t('perimetryProtocol'));
+  add('waistHeight','Relação cintura/altura',site?ratio(input.waist,height):null,'razão','calculated','waist-height',['waist','height','heightUnit','waistSite','perimetryProtocol'],{technique:'perimetry',reason:site?'Informe cintura e altura positivas.':'Identifique o local anatômico da cintura e descreva o protocolo quando escolher outro local.'});
+  add('waistHip','Relação cintura/quadril',site?ratio(input.waist,input.hip):null,'razão','calculated','waist-hip',['waist','hip','waistSite','perimetryProtocol'],{technique:'perimetry',reason:site?'Informe cintura e quadril positivos.':'Identifique o local anatômico da cintura.'});
+  if(t('circumferenceEquation')==='rfm'){
+   const r=rfm({height,waist:input.waist,sexParameter:t('sexParameter'),age:input.equationAge,waistSite:t('waistSite'),population:t('population')});
+   add('fat','Gordura estimada — RFM',r.value,'%','estimated','rfm-2018',['height','heightUnit','waist','waistSite','sexParameter','equationAge','population'],{reason:r.reason,technique:'perimetry',reference:'rfm',warning:'Estimativa populacional experimental; sem diagnóstico. Aplicabilidade individual exige revisão profissional.'});
+  }
+ }
+ if(techniques.includes('skinfolds')&&t('skinfoldEquation')&&t('skinfoldEquation')!=='none'){
+  const r=jp3({equation:t('skinfoldEquation'),age:input.equationAge,chestFold:input.chestFold,abdominal:input.abdominal,thighFold:input.thighFold,population:t('population'),protocolConfirmed:input.jpProtocolConfirmed==='yes'&&!!t('caliper')});
+  const keys=['chestFold','abdominal','thighFold','equationAge','population','jpProtocolConfirmed','caliper','skinfoldEquation','skinfoldProtocol'];
+  const method=t('skinfoldEquation')+'-siri';
+  add('density','Densidade estimada — '+t('skinfoldEquation'),r.density,'g/mL','estimated',method,keys,{technique:'skinfolds',reference:'jp3',reason:r.reason});
+  add('fat','Gordura estimada — '+t('skinfoldEquation')+' + Siri',r.value,'%','estimated',method,keys,{technique:'skinfolds',reference:'jp3',conversion:{id:'siri-two-compartment',version:'1',formula:'495 / density - 450',reference:REFERENCES.siri},reason:r.reason,warning:'Modelo de dois compartimentos com pressupostos de densidade constantes; não é medição direta nem diagnóstico.'});
+ }
+ if(techniques.includes('perimetry')&&techniques.includes('skinfolds')&&t('circumferenceEquation')==='rfm'&&t('sexParameter')==='female'&&t('skinfoldEquation')==='jp3-male')issues.push({code:'parameter-mismatch',message:'Revisar parâmetros: RFM com coeficiente feminino e JP3 com variante masculina. As estimativas foram mantidas separadas.',resultIds:['rfm-2018:fat','jp3-male-siri:fat']});
+ const sourceFor=key=>{
+  const source=t(key+'Source')&&t(key+'Source')!=='inherit'?t(key+'Source'):t('resultSource');
+  const device=t(key+'Device')||t('device')||[t('deviceManufacturer'),t('deviceModel')].filter(Boolean).join(' ');
+  const protocol=t(key+'Protocol')||t('protocol'),description=t(key+'Description')||t('resultDescription');
+  const valid=source==='bia'?techniques.includes('bia')&&!!device:source==='skinfolds'?techniques.includes('skinfolds')&&!!protocol:source==='other'?!!description:false;
+  return {source,device,protocol,description,valid};
+ };
+ if(techniques.some(t=>t==='bia'||t==='skinfolds')){
+  for(const key of ['fat','fatFreeMass']){
+   const source=sourceFor(key),present=n(key)!==null;
+   if(!present&&key==='fatFreeMass')continue;
+   const valid=source.valid&&(key==='fat'?pct(input[key]):n(key)!==null&&n(key)>=0);
+   add(key,key==='fat'?'Gordura informada — '+(source.source||'origem pendente'):'Massa livre de gordura informada',valid?n(key):null,key==='fat'?'%':'kg',source.source==='bia'?'device_reported':'manual','reported-'+(source.source||'unknown'),[key,key+'Source',key+'Device',key+'Protocol',key+'Description','resultSource','device','deviceManufacturer','deviceModel','deviceAlgorithm','protocol','resultDescription','conditions'],{technique:source.source||'external',reference:'reported',source,reason:present?'Identifique uma origem válida, compatível com a técnica ativa.':'Percentual não informado. R e Xc não substituem esse resultado.'});
+  }
+ }
+ if(techniques.includes('bia')){
+  for(const key of ['deviceFatMass','muscle'])if(n(key)!==null){
+   const device=t('device')||[t('deviceManufacturer'),t('deviceModel')].filter(Boolean).join(' ');
+   add(key==='deviceFatMass'?'fatMass':'muscle',key==='deviceFatMass'?'Massa de gordura informada pelo aparelho':'Massa muscular esquelética informada pelo aparelho',device&&n(key)>=0?n(key):null,'kg','device_reported','reported-bia',[key,'device','deviceManufacturer','deviceModel','deviceAlgorithm','conditions'],{technique:'bia',reference:'reported',reason:'Identifique o equipamento e um valor não negativo.'});
+  }
+  if(n('resistance')!==null||n('reactance')!==null)add('rawComposition','Composição a partir de R / Xc',null,'—','estimated','bia-raw',['resistance','reactance','device'],{reason:UNAVAILABLE['bia-raw'],technique:'bia'});
+ }
+ for(const parent of [...output].filter(x=>x.key==='fat'&&x.status==='available')){
+  const m=masses(input.weight,parent.value);
+  for(const key of ['fatMass','fatFreeMass']){
+   const r=add(key,(key==='fatMass'?'Massa de gordura':'Massa livre de gordura')+' — '+parent.method,m?.[key]??null,'kg','calculated',parent.method+'-derived',['weight'],{technique:parent.technique,parentResultId:parent.id,parentSnapshot:JSON.parse(JSON.stringify(parent)),reason:'Informe peso positivo para derivar a massa.',warning:'Derivado do percentual identificado; herda suas limitações. Massa livre de gordura não é massa muscular.'});
+   const reported=output.find(x=>x.key===key&&x.kind==='device_reported'&&x.status==='available');
+   if(reported&&parent.kind==='device_reported'&&m&&Math.abs(reported.value-r.value)>1e-9){r.reviewRequired=true;issues.push({code:'device-mismatch',message:`Revisar ${key==='fatMass'?'massa de gordura':'massa livre de gordura'}: valor calculado ${r.value.toFixed(3)} kg e informado ${reported.value} kg. Ambos preservados; a diferença pode incluir arredondamento.`,resultIds:[reported.id,r.id]});}
+  }
+ }
+ return {engineVersion:VERSION,assessedAt,calculatedAt,inputSnapshot:input,techniques:[...techniques],results:output,issues};
+}
+function validationErrors(input){
+ const errors=[];
+ for(const key of ['weight','height','equationAge',...CIRC,...FOLDS,...BIA,'fat','fatFreeMass']){
+  if(!Object.hasOwn(input,key)||trim(input[key])==='')continue;
+  const v=number(input[key]);
+  if(v===null||v<0||(['fat','bodyWater'].includes(key)&&v>100)||(['weight','height',...CIRC,...FOLDS].includes(key)&&v===0))errors.push({key,message:'Valor inválido: '+key+'. Use um número decimal na unidade indicada.'});
+ }
+ if(!positive(input.weight))errors.push({key:'weight',message:'Informe peso positivo.'});
+ return errors;
+}
+function delta(current,previous){
+ const same=['key','unit','protocol','method','patientId'].every(k=>trim(current[k])&&current[k]===previous[k]);
+ if(!same||!current.date||!previous.date||previous.date>=current.date||number(current.value)===null||number(previous.value)===null)return {value:null,percent:null,reason:'Exige mesma medida, paciente, unidade, método e protocolo, em datas distintas e ordenadas.'};
+ const value=number(current.value)-number(previous.value);
+ return {value,percent:number(previous.value)===0?null:value/number(previous.value)*100,reason:number(previous.value)===0?'Variação percentual indisponível: valor anterior zero.':''};
+}
+function observations(record){
+ const run=record.calculationRun;if(!run)return [];
+ const i=run.inputSnapshot,rows=[];
+ for(const key of ['weight','height',...CIRC,...FOLDS]){
+  if(number(i[key])===null)continue;
+  const technique=CIRC.includes(key)?'perimetry':FOLDS.includes(key)?'skinfolds':'general';
+  const protocol=technique==='general'?trim(i.generalProtocol):technique==='perimetry'?trim(i.perimetryProtocol)+(key==='waist'?'|'+trim(i.waistSite):''):trim(i.skinfoldProtocol);
+  // Missing documented protocol must never become comparable via a delimiter.
+  const documented=technique==='general'?trim(i.generalProtocol):technique==='perimetry'?trim(i.perimetryProtocol):trim(i.skinfoldProtocol);
+  rows.push({key,value:key==='height'?convert(i[key],i.heightUnit||'cm','cm'):number(i[key]),unit:key==='weight'?'kg':FOLDS.includes(key)?'mm':'cm',method:technique,protocol:documented&&(key!=='waist'||['nhanes-iliac','who-midpoint','other'].includes(trim(i.waistSite)))?protocol:'',patientId:record.patientId,date:record.date,recordId:record.id});
+ }
+ for(const r of run.results.filter(r=>r.status==='available'&&(r.kind==='device_reported'||r.kind==='manual'||(trim(i.generalProtocol)&&(r.technique!=='perimetry'||trim(i.perimetryProtocol))&&(r.technique!=='skinfolds'||trim(i.skinfoldProtocol))))))rows.push({key:r.key,value:r.value,unit:r.unit,method:r.method,protocol:JSON.stringify({v:r.equationVersion,source:r.source||r.parentSnapshot?.source||null,waistSite:i.waistSite||null,perimetryProtocol:i.perimetryProtocol||null,skinfoldProtocol:i.skinfoldProtocol||null,caliper:i.caliper||null,deviceManufacturer:i.deviceManufacturer||null,deviceModel:i.deviceModel||null,deviceAlgorithm:i.deviceAlgorithm||null,conditions:i.conditions||null,generalProtocol:i.generalProtocol||null,sexParameter:i.sexParameter||null}),patientId:record.patientId,date:record.date,recordId:record.id});
+ return rows;
+}
+function differences(record,records){
+ const prior=records.filter(x=>x.patientId===record.patientId&&x.date<record.date).sort((a,b)=>b.date.localeCompare(a.date)||String(b.createdAt||'').localeCompare(String(a.createdAt||''))||String(b.id).localeCompare(String(a.id)));
+ return observations(record).flatMap(now=>{
+  for(const p of prior){for(const before of observations(p)){const d=delta(now,before);if(d.value!==null)return [{...now,...d,previousValue:before.value,previousDate:before.date,previousRecordId:p.id}];}}
+  return [];
+ });
+}
+const api={VERSION,REFERENCES,UNAVAILABLE,CIRC,FOLDS,BIA,number,convert,bmi,ratio,masses,rfm,jp3,siri,pickInput,evaluate,validationErrors,delta,observations,differences};
+root.VialenaCalculations=Object.freeze(api);if(typeof module!=='undefined'&&module.exports)module.exports=api;
+})(globalThis);
+
+</script>
+<script>
+/* Presentation adapter for the pure calculations module. No persistent storage. */
+(function(root){
+'use strict';
+const C=root.VialenaCalculations;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const labels={calculated:'Calculado matematicamente',estimated:'Estimado por equação',device_reported:'Informado pelo aparelho',manual:'Informado pelo profissional'};
+const friendly=text=>{
+ let s=String(text??'');
+ for(const [id,label] of [['jp3-male-siri-derived','Jackson–Pollock 3 masculino + Siri (derivado)'],['jp3-male-siri','Jackson–Pollock 3 masculino + Siri'],['jp3-male','Jackson–Pollock 3 masculino'],['jp3-female','Jackson–Pollock 3 feminino'],['jp7','Jackson–Pollock 7'],['rfm-2018-derived','RFM (derivado)'],['rfm-2018','RFM'],['reported-bia-derived','relatório de bioimpedância (derivado)'],['reported-bia','relatório de bioimpedância'],['reported-skinfolds-derived','equação externa de dobras (derivado)'],['reported-skinfolds','equação externa de dobras'],['reported-other-derived','outro método documentado (derivado)'],['reported-other','outro método documentado'],['waist-height','cintura ÷ altura'],['waist-hip','cintura ÷ quadril']])s=s.split(id).join(label);
+ return s.replace(/\bbia\b/g,'bioimpedância').replace(/\bskinfolds\b/g,'dobras cutâneas').replace(/\bother\b/g,'outro método').replace(/\bbmi\b/g,'peso ÷ altura²');
+};
+const metricLabel={weight:'Peso',height:'Altura',waist:'Cintura',abdomen:'Abdômen no umbigo',hip:'Quadril',fat:'Gordura percentual',fatMass:'Massa de gordura',fatFreeMass:'Massa livre de gordura',density:'Densidade corporal',bmi:'IMC',waistHeight:'Cintura/altura',waistHip:'Cintura/quadril',chestFold:'Dobra peitoral',abdominal:'Dobra abdominal',thighFold:'Dobra da coxa'};
+const fmt=(v,d=2)=>Number.isFinite(v)?v.toLocaleString('pt-BR',{maximumFractionDigits:d,minimumFractionDigits:0}):'Indisponível';
+const select=(name,label,options)=>`<div class="field full"><label for="motor-${name}">${label}</label><select class="select" id="motor-${name}" name="${name}">${options.map(([v,l])=>`<option value="${v}">${l}</option>`).join('')}</select></div>`;
+const text=(name,label)=>`<div class="field full"><label for="motor-${name}">${label}</label><input class="input" id="motor-${name}" name="${name}" maxlength="240"></div>`;
+function controls(section){
+ if(section==='general')return `<div class="fields">${select('heightUnit','Unidade da altura',[['cm','Centímetros (cm)'],['m','Metros (m)']])}${text('generalProtocol','Protocolo / equipamento de peso e altura (para comparação histórica)')}</div><div class="fields" id="motor-eligibility" hidden><div class="field"><label for="motor-equationAge">Idade na data da avaliação (anos completos)</label><input class="input" id="motor-equationAge" name="equationAge" inputmode="numeric" type="text" pattern="[0-9]+" placeholder="Informe explicitamente"></div>${select('sexParameter','Parâmetro exigido pela RFM (não inferido do cadastro)',[['','Não disponível / não informado'],['male','Coeficiente masculino (0)'],['female','Coeficiente feminino (1)']])}${select('population','Contexto de elegibilidade da simulação',[['','Não confirmado'],['general-adult','Adulto geral fictício; sem condição especial informada'],['special','Gestação, atleta ou condição especial — estimativa indisponível']])}<p class="small muted field full">Idade é a da avaliação, não a idade atual do cadastro. O contexto é declarado pelo profissional; não constitui validação clínica. Modelos populacionais podem não se aplicar a cada indivíduo.</p></div>`;
+ if(section==='perimetry')return select('waistSite','Local anatômico da cintura',[['','Não informado'],['nhanes-iliac','NHANES: bordo superior lateral do ílio direito'],['who-midpoint','Ponto médio entre última costela e crista ilíaca'],['other','Outro local anatômico — descrever no protocolo']])+select('circumferenceEquation','Estimativa opcional por circunferências',[['none','Somente medidas e relações matemáticas'],['rfm','RFM (2018) — experimental']])+`<p class="small muted field full">RFM: 20–69 anos nesta candidata; altura/cintura na mesma unidade; fita horizontal no bordo superior lateral do ílio direito, em pé e ao final da expiração. Cintura anatômica e abdômen no umbigo são medidas distintas.</p>`;
+ if(section==='skinfolds')return select('skinfoldEquation','Protocolo para cálculo automático',[['none','Somente registro de medidas'],['jp3-male','Jackson–Pollock 3 — masculino + Siri'],['jp3-female','Jackson–Pollock 3 — feminino (indisponível nesta R1)'],['jp7','Jackson–Pollock 7 (indisponível nesta R1)']])+text('caliper','Adipômetro utilizado (identificação)')+`<div class="field full" id="motor-jp-confirm" hidden><label><input type="checkbox" name="jpProtocolConfirmed" value="yes"> Confirmo coleta no protocolo JP3: peitoral, abdominal e coxa, em mm.</label><p class="small muted">Variante masculina: 18–61 anos; soma de 14–118 mm adotada nesta demonstração. Os demais sítios não substituem os três exigidos. Siri pressupõe densidades constantes de gordura e massa livre de gordura.</p></div>`;
+ if(section==='bia')return text('deviceManufacturer','Fabricante do equipamento (quando conhecido)')+text('deviceModel','Modelo do equipamento (quando conhecido)')+text('deviceAlgorithm','Versão / algoritmo informado pelo fabricante (opcional)')+`<div class="field full"><label for="motor-deviceFatMass">Massa de gordura informada pelo aparelho (kg)</label><input class="input" type="text" inputmode="decimal" id="motor-deviceFatMass" name="deviceFatMass" placeholder="Não informado"></div><p class="small muted field full">Os dados estruturados complementam a identificação marca/modelo abaixo. A massa muscular esquelética só pode ser informada se o aparelho reportar esse resultado específico.</p>`;
+ return '';
+}
+function read(form){const data={};for(const el of form.elements)if(el.name&&!el.disabled)data[el.name]=el.type==='checkbox'?(el.checked?'yes':'no'):el.value;return data;}
+function cards(run){return `<div class="motor-results-grid">${run.results.map(r=>`<div class="motor-result" data-result-id="${esc(r.id)}" data-result-status="${r.status}"><span class="motor-kind">${r.status==='unavailable'?'Indisponível':labels[r.kind]}</span><h3>${esc(friendly(r.label))}</h3><output>${r.status==='available'?fmt(r.value,r.key==='density'?6:r.unit==='razão'?3:2)+' '+esc(r.unit):'—'}</output><p>${esc(r.status==='unavailable'?r.reason:r.warning||friendly(r.method))}</p>${r.reviewRequired?'<p class="motor-warning">Revisar divergência com o aparelho.</p>':''}</div>`).join('')}</div>${run.issues.map(i=>`<p class="notice warn">${esc(i.message)}</p>`).join('')}`;}
+function sync(form,techniques){
+ const has=t=>techniques.includes(t),get=k=>form.elements.namedItem(k);
+ const needs=(has('perimetry')&&get('circumferenceEquation')?.value==='rfm')||(has('skinfolds')&&get('skinfoldEquation')?.value!=='none');
+ const eligibility=form.querySelector('#motor-eligibility');eligibility.hidden=!needs;for(const el of eligibility.querySelectorAll('input,select'))el.disabled=!needs;
+ const isRfm=has('perimetry')&&get('circumferenceEquation')?.value==='rfm';get('sexParameter').disabled=!isRfm;get('sexParameter').closest('.field').hidden=!isRfm;
+ const isJP=has('skinfolds')&&get('skinfoldEquation')?.value==='jp3-male';
+ const confirm=form.querySelector('#motor-jp-confirm');confirm.hidden=!isJP;get('jpProtocolConfirmed').disabled=!isJP;
+ for(const key of C.FOLDS){const el=get(key),show=has('skinfolds')&&(!isJP||['chestFold','abdominal','thighFold'].includes(key));el.disabled=!show;el.closest('.field').hidden=!show;}
+ // Text decimal inputs preserve comma entry across desktop/mobile browsers.
+ // Conditional provenance fields retain their nodes and draft values.
+ const globalSource=get('resultSource')?.value;
+ for(const [name,show] of [['protocol',globalSource==='skinfolds'],['resultDescription',globalSource==='other']]){
+  const el=get(name);if(el){const active=(has('bia')||has('skinfolds'))&&show;el.disabled=!active;el.closest('.field').hidden=!active;}
+ }
+ for(const key of ['fat','fatFreeMass']){
+  const source=get(key+'Source')?.value;
+  for(const [suffix,expected] of [['Description','other'],['Protocol','skinfolds'],['Device','bia']]){
+   const el=get(key+suffix);if(el){const active=(has('bia')||has('skinfolds'))&&source===expected;el.disabled=!active;el.closest('.field').hidden=!active;}
+  }
+ }
+ const raw=read(form),previewInput={...raw};
+ for(const el of form.querySelectorAll('input[data-decimal]')){
+  el.setCustomValidity('');if(el.disabled||!el.value.trim())continue;
+  const n=C.number(el.value),unit=get('heightUnit')?.value||'cm';
+  let min=Number(el.dataset.min),max=Number(el.dataset.max);
+  if(el.name==='height'&&unit==='m'){min/=100;max/=100;}
+  if(n===null||n<min||n>max){el.setCustomValidity(`Informe um número entre ${min} e ${max} na unidade indicada. Vírgula decimal é aceita.`);previewInput[el.name]='';}
+ }
+ const hLabel=form.querySelector('label[for="ass-height"] .unit');if(hLabel)hLabel.textContent='('+(get('heightUnit')?.value||'cm')+')';
+ const run=C.evaluate(previewInput,techniques),preview=form.querySelector('#motor-preview');
+ const bmi=run.results.find(r=>r.id==='bmi:bmi'),bmiLive=form.querySelector('#bmi-live');
+ if(bmiLive)bmiLive.textContent=bmi?.status==='available'?bmi.value.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1}):'—';
+ // Only non-interactive output nodes change. Never replace inputs, toolbar or selectors.
+ preview.innerHTML=cards(run);
+ const resultText=run.results.filter(r=>r.status==='available').map(r=>r.label+': '+fmt(r.value)+' '+r.unit).join('; ');
+ const status=form.querySelector('#motor-announcement');clearTimeout(announceTimer);announceTimer=setTimeout(()=>{if(status.isConnected)status.textContent=resultText||'Preencha as medidas para visualizar resultados.';},450);
+ return run;
+}
+let announceTimer;
+function live(){return `<section class="motor-preview-section" aria-labelledby="motor-title"><div class="row-title"><div><span class="section-kicker">MOTOR DE CÁLCULOS · R1 EXPERIMENTAL</span><h2 id="motor-title">Resultados para revisão</h2></div></div><p class="small muted">Prévia automática. Revise as entradas e os avisos antes de confirmar o registro. Percentuais de métodos distintos permanecem separados; não há média automática.</p><details class="motor-formulas"><summary>Consultar equações e limites antes de confirmar</summary><p>IMC = kg / m². Relações: cintura / altura e cintura / quadril, na mesma unidade. Massa de gordura = peso × % / 100; massa livre de gordura = peso − massa de gordura.</p><p>RFM (Woolcott &amp; Bergman, 2018): 64 − 20 × altura / cintura + 12 × parâmetro (0 masculino, 1 feminino).</p><p>JP3 masculino (Jackson &amp; Pollock, 1978, tabela 4, equação 5): D = 1,10938 − 0,0008267 S + 0,0000016 S² − 0,0002574 idade. S = peitoral + abdominal + coxa (mm). Siri: % = 495 / D − 450.</p><p>Versão das equações: 1. Consulte REFERENCIAS-MOTOR.md no pacote para fontes e limites completos. Variante feminina e JP7 indisponíveis nesta R1. Nenhuma destas estimativas é diagnóstico.</p></details><div id="motor-preview"></div><p id="motor-announcement" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p></section>`;}
+function history(record,records){
+ const run=record.calculationRun;if(!run)return '<p class="small muted">Registro anterior ao motor; sem cálculo retroativo ou alteração dos dados originais.</p>';
+ const differences=C.differences(record,records);
+ return `<section class="motor-history"><h4>Resultados do motor — ${esc(run.engineVersion)}</h4><p class="small">Avaliado em ${esc(run.assessedAt)} · Calculado em ${esc(run.calculatedAt)} · Revisado e confirmado no formulário demonstrativo.</p>${cards(run)}<details><summary>Entradas, métodos e reprodução dos cálculos</summary><p>Valores originais e unidades preservados. Casas decimais de exibição não representam precisão clínica.</p><pre>${esc(JSON.stringify(run,null,2))}</pre></details><h4>Diferenças históricas comparáveis</h4><p class="small muted">Comparação com o registro anterior mais recente de mesma medida, método, protocolo e unidade, em data anterior. Sem comparável documentado, nenhuma diferença é calculada.</p>${differences.length?`<ul>${differences.map(d=>`<li>${esc(metricLabel[d.key]||d.key)} · ${esc(friendly(d.method))}: ${fmt(d.value)} ${esc(d.unit)} (${d.percent===null?'percentual indisponível':fmt(d.percent)+'%'}) desde ${esc(d.previousDate)} · registro ${esc(d.previousRecordId)}</li>`).join('')}</ul>`:'<p>Sem registro anterior comparável.</p>'}</section>`;
+}
+root.VialenaMotorUI={controls,read,sync,live,history,cards};
+})(globalThis);
+
+</script>
+<script>
 
 (() => {
 'use strict';
@@ -542,15 +807,15 @@ const SKINFOLDS = [
  ['abdominal','Abdominal'],['chestFold','Peitoral'],['thighFold','Coxa'],['midaxillary','Axilar média']
 ];
 const BIA_FIELDS = [
- ['fat','Gordura corporal estimada','%'],['muscle','Massa muscular estimada','kg'],
+ ['fat','Gordura corporal estimada','%'],['muscle','Massa muscular esquelética informada pelo aparelho','kg'],
  ['fatFreeMass','Massa livre de gordura estimada','kg'],['bodyWater','Água corporal estimada','%'],
  ['resistance','Resistência','Ω'],['reactance','Reatância','Ω']
 ];
 const ASSESSMENT_NUMBERS=['weight','height',...CIRCUMFERENCES.map(x=>x[0]),...SKINFOLDS.map(x=>x[0]),...BIA_FIELDS.map(x=>x[0])];
 const methodLabel={perimetry:'Perimetria',skinfolds:'Dobras cutâneas',bia:'Bioimpedância por aparelho',combined:'Avaliação combinada'};
 const resultSourceLabel={bia:'Equipamento de bioimpedância',skinfolds:'Equação de dobras aplicada externamente',other:'Outro método informado',none:'Não informado'};
-const bmiOf=(weight,height)=>Number.isFinite(+weight)&&Number.isFinite(+height)&&+weight>0&&+height>0?+weight/(+height/100)**2:null;
-function numField(key,label,unit,min,max){return `<div class="field"><label for="ass-${key}">${label} <span class="unit">(${unit})</span></label><input id="ass-${key}" class="input" name="${key}" type="number" inputmode="decimal" min="${min}" max="${max}" step="0.1" placeholder="Não informado"></div>`;}
+const bmiOf=(weight,height)=>VialenaCalculations.bmi(weight,height);
+function numField(key,label,unit,min,max){return `<div class="field"><label for="ass-${key}">${label} <span class="unit">(${unit})</span></label><input id="ass-${key}" class="input" name="${key}" type="text" inputmode="decimal" data-decimal data-min="${min}" data-max="${max}" placeholder="Não informado"></div>`;}
 function detailGrid(a,fields,unit){return fields.filter(([k])=>a[k]!==null && a[k]!==undefined && Number.isFinite(+a[k])).map(([k,label,u])=>`<div class="detail-item"><span>${esc(label)}</span><strong>${fmt(a[k])} ${unit||u||''}</strong></div>`).join('') || '<p class="small muted">Sem medidas registradas nesta seção.</p>';}
 function assessmentTechniques(){
  const method=document.querySelector('#assessment-method')?.value||'';
@@ -591,6 +856,7 @@ function updateAssessmentUI(){
   if((source.value==='bia'&&!has('bia'))||(source.value==='skinfolds'&&!has('skinfolds'))){source.value='none';}
   // Não selecionar a origem automaticamente: quem realizou a medição deve declará-la.
  }
+ VialenaMotorUI.sync(form,techniques);
 }
 function textField(name,label){return `<div class="field full"><label for="ass-${name}">${label}</label><input class="input" id="ass-${name}" name="${name}" maxlength="240"></div>`;}
 function resultOrigin(key,label){return `<div class="field full result-origin"><label for="ass-${key}-source">Origem de ${label}</label><select class="select" id="ass-${key}-source" name="${key}Source"><option value="inherit">Usar origem geral acima</option><option value="bia">Equipamento de bioimpedância</option><option value="skinfolds">Equação de dobras aplicada externamente</option><option value="other">Outro método documentado</option></select><div class="fields">${[['Description','description','Descrição do outro método'],['Protocol','protocol','Equação / protocolo externo'],['Device','device','Equipamento específico (opcional)']].map(([suffix,id,text])=>`<div class="field full"><label for="ass-${key}-${id}">${text} — ${label}</label><input class="input" id="ass-${key}-${id}" name="${key}${suffix}" maxlength="240" placeholder="Se vazio, usa a informação geral correspondente"></div>`).join('')}</div></div>`;}
@@ -614,17 +880,18 @@ function assessment(){
  const options=state.consultations.filter(c=>c.patientId===state.selected);
  const oldHeight=[...assessments].reverse().find(x=>x.height)?.height;
  return `${pageHeader('Antropometria e composição corporal','Avaliação corporal','Registre medidas de perímetro, dobras cutâneas e resultados do aparelho de bioimpedância, com métodos claramente identificados.')}
- <div class="assessment-layout"><section class="card assessment-main"><div class="row-title"><div><h2>Nova avaliação</h2><p class="small muted">As medições são informadas pelo profissional.</p></div><span class="tag">Dados fictícios</span></div>
+ <div class="assessment-layout"><section class="card assessment-main"><div class="row-title"><div><h2>Nova avaliação</h2><p class="small muted">Informe medidas fictícias; revise a prévia antes de confirmar.</p></div><span class="tag">Dados fictícios</span></div>
  <p class="draft-indicator" id="assessment-draft-status" aria-live="polite">Rascunho desta avaliação protegido ao navegar entre telas nesta aba. Ele desaparecerá ao atualizar.</p>
  <form id="assessment-form">
  <fieldset class="assessment-group"><legend><span class="group-num">01</span> Identificação e dados básicos</legend>
   <div class="fields"><div class="field full"><label for="patient-choice">Paciente</label>${patientPicker()}</div>
   <div class="field"><label for="assessment-date">Data da avaliação</label><input class="input" id="assessment-date" type="date" name="date" required value="${today()}"></div>
   <div class="field"><label for="assessment-consult">Consulta vinculada (opcional)</label><select class="select" id="assessment-consult" name="consultationId"><option value="">Avaliação independente</option>${options.map(c=>`<option value="${esc(c.id)}">${dmy(c.date)} · ${esc(c.objective)}</option>`).join('')}</select></div>
-  <div class="field"><label for="ass-weight">Peso <span class="unit">(kg)</span></label><input class="input" type="number" step="0.1" min="1" max="500" id="ass-weight" name="weight" required placeholder="Ex.: 71,5"></div>
-  <div class="field"><label for="ass-height">Altura <span class="unit">(cm)</span></label><input class="input" type="number" step="0.1" min="80" max="250" id="ass-height" name="height" value="${oldHeight||''}" placeholder="Ex.: 168"></div>
-  <div class="field full"><label for="assessment-method">Técnica(s) utilizada(s) na avaliação</label><select class="select" id="assessment-method" name="method" required aria-describedby="assessment-method-help"><option value="" selected disabled>Selecione a técnica utilizada</option><option value="perimetry">Circunferências — fita métrica</option><option value="skinfolds">Dobras cutâneas — adipômetro</option><option value="bia">Bioimpedância — equipamento</option><option value="combined">Avaliação combinada — escolher técnicas</option></select><p class="small muted" id="assessment-method-help">A seleção mostrará apenas os campos correspondentes. Os resultados não são calculados automaticamente a partir de perímetros.</p></div></div>
-  <div class="technique-picker" id="combined-picker" hidden><strong>Quais técnicas foram utilizadas?</strong><p class="small muted">Marque pelo menos duas técnicas para uma avaliação combinada.</p><div class="technique-options">
+  <div class="field"><label for="ass-weight">Peso <span class="unit">(kg)</span></label><input class="input" type="text" inputmode="decimal" data-decimal data-min="1" data-max="500" id="ass-weight" name="weight" required placeholder="Ex.: 71,5"></div>
+  <div class="field"><label for="ass-height">Altura <span class="unit">(cm)</span></label><input class="input" type="text" inputmode="decimal" data-decimal data-min="80" data-max="250" id="ass-height" name="height" value="${oldHeight||''}" placeholder="Ex.: 168"></div>
+  <div class="field full"><label for="assessment-method">Técnica(s) utilizada(s) na avaliação</label><select class="select" id="assessment-method" name="method" required aria-describedby="assessment-method-help"><option value="" selected disabled>Selecione a técnica utilizada</option><option value="perimetry">Circunferências — fita métrica</option><option value="skinfolds">Dobras cutâneas — adipômetro</option><option value="bia">Bioimpedância — equipamento</option><option value="combined">Avaliação combinada — escolher técnicas</option></select><p class="small muted" id="assessment-method-help">A seleção mostrará apenas os campos correspondentes. Escolha um protocolo para visualizar os cálculos e estimativas disponíveis.</p></div></div>
+  ${VialenaMotorUI.controls('general')}
+ <div class="technique-picker" id="combined-picker" hidden><strong>Quais técnicas foram utilizadas?</strong><p class="small muted">Marque pelo menos duas técnicas para uma avaliação combinada.</p><div class="technique-options">
    <label><input type="checkbox" name="usesPerimetry" value="yes"> <span>Circunferências</span></label>
    <label><input type="checkbox" name="usesSkinfolds" value="yes"> <span>Dobras cutâneas</span></label>
    <label><input type="checkbox" name="usesBia" value="yes"> <span>Bioimpedância</span></label>
@@ -633,29 +900,29 @@ function assessment(){
   <div class="bmi-panel"><div><span class="section-kicker">IMC CALCULADO</span><strong id="bmi-live">—</strong><small>kg/m² · peso ÷ altura²</small></div><p>IMC é uma relação matemática entre peso e altura. <strong>Não mede percentual de gordura nem massa muscular</strong> e não substitui avaliação clínica individual.</p></div>
  </fieldset>
  <fieldset class="assessment-group" data-assessment-section="perimetry" hidden><legend><span class="group-num">02</span> Circunferências corporais</legend>
- <p class="small muted">Fita métrica · cm. Informe apenas pontos anatômicos efetivamente medidos. Circunferências não fornecem, isoladamente, estimativa confiável de gordura ou músculo.</p>
- <div class="fields">${textField('perimetryProtocol','Protocolo / condições da perimetria (opcional)')}${CIRCUMFERENCES.map(([k,label])=>numField(k,label,'cm',1,300)).join('')}</div>
+ <p class="small muted">Fita métrica · cm. Informe apenas pontos anatômicos efetivamente medidos. A RFM é uma estimativa opcional com condições de aplicação; perímetros não calculam massa muscular.</p>
+ <div class="fields">${VialenaMotorUI.controls('perimetry')}${textField('perimetryProtocol','Protocolo / condições da perimetria (opcional)')}${CIRCUMFERENCES.map(([k,label])=>numField(k,label,'cm',1,300)).join('')}</div>
  </fieldset>
  <fieldset class="assessment-group" data-assessment-section="skinfolds" hidden><legend><span class="group-num">03</span> Dobras cutâneas</legend>
- <p class="small muted">Adipômetro · mm. A estimativa de composição corporal requer protocolo e equação apropriados, ainda não implementados automaticamente aqui.</p>
- <div class="fields">${textField('skinfoldProtocol','Protocolo de coleta das dobras (opcional)')}${SKINFOLDS.map(([k,label])=>numField(k,label,'mm',0,100)).join('')}</div>
+ <p class="small muted">Adipômetro · mm. Selecione um protocolo verificado para densidade e percentual estimado; as variantes indisponíveis explicam a pendência.</p>
+ <div class="fields">${VialenaMotorUI.controls('skinfolds')}${textField('skinfoldProtocol','Protocolo de coleta das dobras (opcional)')}${SKINFOLDS.map(([k,label])=>numField(k,label,'mm',0,100)).join('')}</div>
  </fieldset>
  <fieldset class="assessment-group" data-assessment-section="bia" hidden><legend><span class="group-num">04</span> Dados do equipamento de bioimpedância</legend>
  <p class="small muted">Preencha somente os valores exibidos pelo equipamento. Marca, modelo e condições da avaliação ajudam a interpretar e comparar medições.</p>
  <div class="fields">
- ${BIA_FIELDS.filter(([k])=>['resistance','reactance','muscle','bodyWater'].includes(k)).map(([k,label,unit])=>numField(k,label,unit,0,k==='bodyWater'?100:1000)).join('')}
+ ${VialenaMotorUI.controls('bia')}${BIA_FIELDS.filter(([k])=>['resistance','reactance','muscle','bodyWater'].includes(k)).map(([k,label,unit])=>numField(k,label,unit,0,k==='bodyWater'?100:1000)).join('')}
  <div class="field full"><label for="ass-device">Equipamento (marca / modelo)</label><input class="input" id="ass-device" name="device" maxlength="140" placeholder="Ex.: modelo utilizado"></div>
  <div class="field full"><label for="ass-conditions">Condições da medição</label><textarea class="textarea" id="ass-conditions" name="conditions" maxlength="800" placeholder="Ex.: horário, hidratação, exercícios recentes, diferenças de método..."></textarea></div>
  </div></fieldset>
  <fieldset class="assessment-group" data-assessment-section="results" hidden><legend><span class="group-num">05</span> Resultados de composição corporal informados</legend>
- <p class="small muted">Resultados externos da equação escolhida ou do equipamento. Não calculamos percentual de gordura ou massa muscular automaticamente nesta versão.</p>
+ <p class="small muted">Preenchimento opcional para resultados externos ou do aparelho. Os cálculos automáticos aparecem na prévia abaixo e permanecem separados destes valores.</p>
  <div class="fields">
   <div class="field"><label for="ass-result-source">Origem da estimativa (caso preencha resultados)</label><select class="select" id="ass-result-source" name="resultSource"><option value="none">Nenhuma estimativa informada</option><option value="skinfolds">Equação de dobras cutâneas</option><option value="bia">Equipamento de bioimpedância</option><option value="other">Outro método documentado</option></select></div>
   <div class="field"><label for="ass-protocol">Equação / protocolo (se utilizado)</label><input class="input" id="ass-protocol" name="protocol" maxlength="120" placeholder="Protocolo aplicado externamente"></div>
   ${textField('resultDescription','Descrição geral do outro método documentado')}${BIA_FIELDS.filter(([k])=>['fat','fatFreeMass'].includes(k)).map(([k,label,unit])=>numField(k,label,unit,0,k==='fat'?100:1000)+resultOrigin(k,label)).join('')}
  </div></fieldset>
  <div class="technique-empty" id="technique-empty">Selecione a técnica utilizada para exibir suas medições.</div>
- <div class="assessment-actions"><p class="small muted">Preencha somente as medidas disponíveis. No mínimo, informe peso, data e paciente. Todos os registros são fictícios e temporários.</p><button type="submit" class="button">Salvar avaliação demonstrativa →</button></div>
+ ${VialenaMotorUI.live()}<div class="assessment-actions"><p class="small muted">Preencha somente as medidas disponíveis. No mínimo, informe peso, data e paciente. Todos os registros são fictícios e temporários.</p><button type="submit" class="button">Confirmar avaliação demonstrativa →</button></div>
  </form></section>
  <aside class="stack assessment-aside"><section class="card"><h2>Última avaliação</h2>${last?`<div class="summary"><div class="mini"><span>Peso</span><strong>${measure(last.weight,' kg')}</strong></div><div class="mini"><span>IMC</span><strong>${last.height?fmt(bmiOf(last.weight,last.height)):'—'}</strong></div><div class="mini"><span>Gordura informada</span><strong>${measure(last.fat,'%')}</strong></div></div><p class="small muted" style="margin-top:16px">${dmy(last.date)} · ${esc(methodLabel[last.method]||'Método não informado')}</p><button class="link" type="button" data-page="history">Abrir histórico completo →</button>`:'<div class="empty">Nenhuma avaliação cadastrada.</div>'}</section>
  <section class="card"><h2>Evolução de peso</h2>${lineChart(assessments,'weight','Peso (kg)')}</section>
@@ -675,7 +942,7 @@ function history(){
  ${SKINFOLDS.some(([k])=>x[k]!=null)?`<h4>Dobras (mm)</h4><div class="detail-grid">${detailGrid(x,SKINFOLDS,'mm')}</div>`:''}
  ${['fat','fatFreeMass'].some(k=>x[k]!=null)?`<h4>Resultados de composição corporal</h4><div class="detail-grid">${detailGrid(x,BIA_FIELDS.filter(([k])=>['fat','fatFreeMass'].includes(k)))}</div>`:''}
  ${['muscle','bodyWater','resistance','reactance'].some(k=>x[k]!=null)?`<h4>Bioimpedância — dados do equipamento</h4><div class="detail-grid">${detailGrid(x,BIA_FIELDS.filter(([k])=>['muscle','bodyWater','resistance','reactance'].includes(k)))}</div>`:''}
- ${provenanceHistory(x)}${x.device?`<p class="small"><strong>Equipamento:</strong> ${esc(x.device)}</p>`:''}${x.protocol?`<p class="small"><strong>Protocolo:</strong> ${esc(x.protocol)}</p>`:''}${x.conditions?`<p class="small"><strong>Observações:</strong> ${esc(x.conditions)}</p>`:''}</details>`}</div></article>`}).join('')}</div>`:'<div class="empty">Ainda não há registros.</div>'}</section>
+ ${VialenaMotorUI.history(x,state.assessments)}${provenanceHistory(x)}${x.device?`<p class="small"><strong>Equipamento:</strong> ${esc(x.device)}</p>`:''}${x.protocol?`<p class="small"><strong>Protocolo:</strong> ${esc(x.protocol)}</p>`:''}${x.conditions?`<p class="small"><strong>Observações:</strong> ${esc(x.conditions)}</p>`:''}</details>`}</div></article>`}).join('')}</div>`:'<div class="empty">Ainda não há registros.</div>'}</section>
  <section class="stack"><div class="card"><h2>Resumo individual</h2><div class="summary"><div class="mini"><span>Consultas</span><strong>${state.consultations.filter(c=>c.patientId===state.selected).length}</strong></div><div class="mini"><span>Avaliações</span><strong>${state.assessments.filter(c=>c.patientId===state.selected).length}</strong></div><div class="mini"><span>Agendamentos</span><strong>${state.appointments.filter(c=>c.patientId===state.selected).length}</strong></div></div></div><div class="hintbox">No produto real, o histórico será persistido com permissões por profissional e trilhas de auditoria. Este protótipo não grava informações após atualizar.</div></section></div>`;
 }
 const draftStore=new VialenaDraftStore();
@@ -722,8 +989,7 @@ function restoreDraft(){const kind=draftKind();if(!kind)return;const f=draftForm
 }
 function updateLiveBMI(){
  const el=$('#bmi-live');if(!el)return;
- const w=Number($('#ass-weight')?.value),h=Number($('#ass-height')?.value);
- const bmi=bmiOf(w,h);
+ const bmi=VialenaCalculations.bmi($('#ass-weight')?.value,$('#ass-height')?.value,$('[name=heightUnit]')?.value||'cm');
  el.textContent=bmi!==null?bmi.toLocaleString('pt-BR',{minimumFractionDigits:1,maximumFractionDigits:1}):'—';
 }
 const renders={dashboard,patients,agenda,consultation,assessment,history};
@@ -794,13 +1060,21 @@ document.addEventListener('submit',e=>{const f=e.target;const formKind=f.getAttr
    if(!method){document.querySelector('#assessment-method')?.focus();message('Selecione a técnica utilizada na avaliação.');return;}
    if(method==='combined'&&techniques.length<2){document.querySelector('#combined-picker')?.scrollIntoView({behavior:'smooth',block:'center'});document.querySelector('[name="usesPerimetry"]')?.focus();message('Na avaliação combinada, selecione pelo menos duas técnicas.');return;}
    const active= new Set(['weight','height',...(techniques.includes('perimetry')?CIRCUMFERENCES.map(x=>x[0]):[]),...(techniques.includes('skinfolds')?SKINFOLDS.map(x=>x[0]):[]),...(techniques.includes('bia')?['muscle','bodyWater','resistance','reactance']:[]),...(techniques.some(t=>t==='skinfolds'||t==='bia')?['fat','fatFreeMass']:[])]);
-   const nums=Object.fromEntries(ASSESSMENT_NUMBERS.map(k=>[k,active.has(k)?formNumber(d,k):null]));
+   const engineInput=VialenaMotorUI.read(f);
+   if(techniques.includes('bia')&&String(engineInput.deviceFatMass||'').trim()&&!String(engineInput.device||'').trim()){message('Informe a marca/modelo do equipamento para a massa de gordura reportada.');$('#ass-device').focus();return;}
+   const inputSnapshot=VialenaCalculations.pickInput(engineInput,techniques);
+   const inputErrors=VialenaCalculations.validationErrors(inputSnapshot);
+   if(inputErrors.length){message(inputErrors[0].message);f.elements.namedItem(inputErrors[0].key)?.focus();return;}
+   const nums=Object.fromEntries(ASSESSMENT_NUMBERS.map(k=>[k,active.has(k)&&!f.elements.namedItem(k)?.disabled?formNumber(d,k):null]));
+   nums.height=VialenaCalculations.convert(engineInput.height,engineInput.heightUnit||'cm','cm');
    if(Object.entries(nums).some(([k,v])=>v!==null&&(!Number.isFinite(v)||v<0||(['fat','bodyWater'].includes(k)&&v>100)))){message('Revise as medições informadas.');return;}
    const withResults=techniques.includes('skinfolds')||techniques.includes('bia');
    const provenance=VialenaDomain.provenance(d,nums,techniques,MEASUREMENT_FIELDS);
    if(provenance.error){message(provenance.error.message);$('#'+provenance.error.field)?.focus();return;}
    const recordId=`b${++counter}`;
-   state.assessments.push({id:recordId,...provenance,createdAt:new Date().toISOString(),patientId:String(d.get('patientId')),consultationId:String(d.get('consultationId')||'')||null,date:String(d.get('date')),method,techniques,...nums,
+   const calculatedAt=new Date().toISOString();
+   const calculationRun=VialenaCalculations.evaluate(engineInput,techniques,{calculatedAt});
+   state.assessments.push({id:recordId,calculationRun,review:{confirmed:true,confirmedAt:calculatedAt,mode:'demonstrative-local'},...provenance,createdAt:new Date().toISOString(),patientId:String(d.get('patientId')),consultationId:String(d.get('consultationId')||'')||null,date:String(d.get('date')),method,techniques,...nums,
     device:techniques.includes('bia')?String(d.get('device')||'').trim():'',
     protocol:provenance.measurements.find(m=>m.source.protocol&&m.source.method==='skinfolds')?.source.protocol||'',
     resultSource:(()=>{const sources=[...new Set(provenance.measurements.filter(m=>['fat','fatFreeMass'].includes(m.key)).map(m=>m.source.method))];return sources.length>1?'mixed':sources[0]||'none';})(),
